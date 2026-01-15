@@ -119,7 +119,7 @@ def main():
         )
 
         # ---- TREND DETECTION (NORMALIZED SPACE) ----
-        trend = trend_detector.update(
+        raw_trend = trend_detector.update(
             asset_id,
             point,
             normalized_features,

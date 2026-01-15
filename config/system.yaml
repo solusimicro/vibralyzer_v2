@@ -14,7 +14,7 @@ mqtt:
   broker: localhost
   port: 1883
   raw_topic: vibration/raw/#
-  early_fault_topic: vibration/early/{asset}/{point}
+  early_fault_topic: vibration/early_fault/{asset}/{point}
 
 # =========================
 # RAW & BUFFER

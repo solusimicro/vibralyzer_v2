@@ -20,11 +20,11 @@ class TrendDetector:
             hist.pop(0)
 
         # ---- VERY SIMPLE TREND LOGIC (LOCKED VERSION) ----
-        score = sum(abs(v) for v in features.values()) / max(len(features), 1)
+        score = abs(features["acc_hf_rms_g"])
 
-        if score < 1.0:
+        if score < 0.05:
             level = "NORMAL"
-        elif score < 2.0:
+        elif score < 0.12:
             level = "WATCH"
         else:
             level = "WARNING"
