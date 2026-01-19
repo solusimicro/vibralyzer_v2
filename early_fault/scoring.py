@@ -35,40 +35,98 @@ class EarlyFaultFSM:
 
     def update(self, asset, point, trend, persistence):
         key = (asset, point)
+        state = self._state.get(key, EarlyFaultState.NORMAL)
 
-        current_state = self._state.get(key, EarlyFaultState.NORMAL)
+        clear = self._clear_counter.get(key, 0)
 
         # =========================
-        # STATE TRANSITION LOGIC
+        # CRITICAL OVERRIDES (L3)
         # =========================
-        if trend.level == "NORMAL":
-            clear = self._clear_counter.get(key, 0) + 1
-            self._clear_counter[key] = clear
+        if trend.temperature_alarm:
+            state = EarlyFaultState.ALARM
 
+        elif trend.velocity_zone == "D":
+            state = EarlyFaultState.ALARM
+
+        elif (
+            trend.hf_high
+            and trend.envelope_high
+            and persistence >= self.alarm_persistence
+        ):
+            state = EarlyFaultState.ALARM
+
+        # =========================
+        # WARNING (L2)
+        # =========================
+        elif (
+            trend.hf_high
+            and trend.envelope_high
+            and persistence >= self.warning_persistence
+        ):
+            state = EarlyFaultState.WARNING
+
+        elif trend.velocity_zone == "C":
+            state = EarlyFaultState.WARNING
+
+        # =========================
+        # WATCH (L1)
+        # =========================
+        elif trend.hf_high and persistence >= self.watch_persistence:
+            state = EarlyFaultState.WATCH
+
+        # =========================
+        # CLEAR / DOWNGRADE
+        # =========================
+        elif trend.level == "NORMAL":
+            clear += 1
             if clear >= self.hysteresis_clear:
-                current_state = EarlyFaultState.NORMAL
+                state = self._downgrade(state)
+                clear = 0
 
-        elif persistence >= self.alarm_persistence:
-            current_state = EarlyFaultState.ALARM
-            self._clear_counter[key] = 0
+        else:
+            clear = 0
 
-        elif persistence >= self.warning_persistence:
-            current_state = EarlyFaultState.WARNING
-            self._clear_counter[key] = 0
+        self._state[key] = state
+        self._clear_counter[key] = clear
 
-        elif persistence >= self.watch_persistence:
-            current_state = EarlyFaultState.WATCH
-            self._clear_counter[key] = 0
-
-        self._state[key] = current_state
-
-        # =========================
-        # CONFIDENCE ESTIMATION
-        # =========================
-        confidence = min(1.0, persistence / max(self.alarm_persistence, 1))
+        confidence = self._estimate_confidence(trend, persistence, state)
 
         return EarlyFaultResult(
-            state=current_state,
+            state=state,
             confidence=confidence,
             dominant_feature=trend.dominant_feature,
         )
+
+    def _downgrade(self, state):
+        if state == EarlyFaultState.ALARM:
+            return EarlyFaultState.WARNING
+        if state == EarlyFaultState.WARNING:
+            return EarlyFaultState.WATCH
+        return EarlyFaultState.NORMAL
+
+    def _estimate_confidence(self, trend, persistence, state):
+        severity_score = 0.0
+        if trend.velocity_zone in ("C", "D"):
+            severity_score = 1.0
+        elif trend.envelope_high:
+            severity_score = 0.7
+        elif trend.hf_high:
+            severity_score = 0.4
+
+        persistence_score = min(1.0, persistence / self.alarm_persistence)
+
+        state_score = {
+            EarlyFaultState.NORMAL: 0.2,
+            EarlyFaultState.WATCH: 0.5,
+            EarlyFaultState.WARNING: 0.75,
+            EarlyFaultState.ALARM: 1.0,
+        }[state]
+
+        confidence = (
+            0.4 * severity_score +
+            0.4 * persistence_score +
+            0.2 * state_score
+        )
+
+        return round(min(1.0, confidence), 2)
+

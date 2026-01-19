@@ -155,6 +155,7 @@ def main():
 
             # --- ACC ---
             "acceleration_rms_g": l1_features["acc_rms_g"],
+            "acc_peak_g": l1_features["acc_peak_g"],
             "acc_hf_rms_g": l1_features["acc_hf_rms_g"],
             "crest_factor": l1_features["crest_factor"],
             "envelope_rms": l1_features["envelope_rms"],
