@@ -1,52 +1,27 @@
-# =========================
-# MQTT CONFIG
-# =========================
-mqtt:
-  broker: localhost
-  port: 1883
-  raw_topic: vibration/raw/#
-  early_fault_topic: vibration/early_fault/{asset}/{point}
+points:
+  p1mt:
+    type: motor
+    rpm: 2980
+  p2mt:
+    type: motor
+    rpm: 2980
 
-# =========================
-# RAW & BUFFER
-# =========================
-raw:
-  window_size: 4096
-  min_samples: 1024
+  p3gx:
+    type: gearbox
+    rpm: 1480
+  p4gx:
+    type: gearbox
+    rpm: 1480
+  p5gx:
+    type: gearbox
+    rpm: 1480
+  p6gx:
+    type: gearbox
+    rpm: 1480
 
-# =========================
-# L1 FEATURE
-# =========================
-l1_feature:
-  sampling_rate: 25600
-  rpm_default: 3000
-
-# =========================
-# BASELINE (Adaptive)
-# =========================
-baseline:
-  alpha: 0.01
-  min_samples: 100
-
-# =========================
-# EARLY FAULT FSM
-# =========================
-early_fault:
-  watch_persistence: 3
-  warning_persistence: 6
-  alarm_persistence: 10
-  hysteresis_clear: 5
-
-# =========================
-# L2 DIAGNOSTIC
-# =========================
-l2:
-  enable: true
-  cooldown_warning_sec: 600 # 10 menit
-  cooldown_alarm_sec: 60 # 1 menit
-
-# =========================
-# HEARTBEAT
-# =========================
-heartbeat:
-  interval_sec: 10
+  p7pp:
+    type: pump
+    rpm: 2980
+  p8pp:
+    type: pump
+    rpm: 2980
