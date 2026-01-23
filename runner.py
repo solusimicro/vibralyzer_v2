@@ -16,14 +16,30 @@ from diagnostic_l2.cooldown import L2CooldownManager
 from diagnostic_l2.l2_queue import L2JobQueue
 from diagnostic_l2.worker import l2_worker
 
+from analytics.recommendation import RecommendationEngine
+from analytics.recommendation.maintenance_action import MaintenanceActionMapper
+
 from utils.heartbeat import Heartbeat
+
 
 
 def main():
     # =========================
-    # LOAD CONFIG
+    # LOAD CONFIG (FIRST)
     # =========================
     config = load_config()
+
+    # =========================
+    # ANALYTICS (STATIC ENGINE)
+    # =========================
+    recommendation_engine = RecommendationEngine(
+        mapping_path=config["analytics"]["recommendation"]["mapping"],
+        default_lang=config["analytics"]["recommendation"].get("default_lang", "EN"),
+    )
+
+    maintenance_action_mapper = MaintenanceActionMapper(
+        config["analytics"]["maintenance_action"]
+    )
 
     # =========================
     # HEARTBEAT
@@ -33,11 +49,11 @@ def main():
     HEARTBEAT_INTERVAL = config.get("heartbeat", {}).get("interval_sec", 10)
 
     # =========================
-    # BASELINE
+    # BASELINE (STATEFUL)
     # =========================
     baseline = AdaptiveBaseline(
-        alpha=config.get("baseline", {}).get("alpha", 0.01),
-        min_samples=config.get("baseline", {}).get("min_samples", 100),
+        alpha=config["baseline"]["alpha"],
+        min_samples=config["baseline"]["min_samples"],
     )
 
     # =========================
@@ -72,7 +88,7 @@ def main():
         alarm_persistence=config["early_fault"]["alarm_persistence"],
         hysteresis_clear=config["early_fault"]["hysteresis_clear"],
     )
-   
+
     publisher = MQTTPublisher(
         broker=config["mqtt"]["broker"],
         port=config["mqtt"]["port"],
@@ -107,12 +123,8 @@ def main():
             "timestamp": time.time(),
         }
 
-        # ---- TREND (RAW SPACE) ----
-        raw_trend = trend_detector.update(
-            asset_id,
-            point,
-            l1_features,
-        )
+        # ---- TREND ----
+        raw_trend = trend_detector.update(asset_id, point, l1_features)
 
         # ---- BASELINE UPDATE ----
         baseline.update(
@@ -123,11 +135,7 @@ def main():
         )
 
         # ---- PERSISTENCE ----
-        persistence = persistence_checker.update(
-            asset_id,
-            point,
-            raw_trend,
-        )
+        persistence = persistence_checker.update(asset_id, point, raw_trend)
 
         # ---- EARLY FAULT FSM ----
         heartbeat.mark_early_fault_exec()
@@ -141,48 +149,41 @@ def main():
         early_fault_event = {
             "asset": asset_id,
             "point": point,
-            "early_fault": early_fault.state.value in ("WARNING", "ALARM"),
             "state": early_fault.state.value,
             "confidence": early_fault.confidence,
             "dominant_feature": early_fault.dominant_feature,
             "timestamp": early_fault.timestamp,
         }
-        
+
+        # ---- RECOMMENDATION ----
+        recommendation = recommendation_engine.generate(
+            state=early_fault.state.value,
+            dominant_feature=early_fault.dominant_feature,
+        )
+
+        maintenance_action = maintenance_action_mapper.map(recommendation)
+
         # ---- SCADA SNAPSHOT ----
         scada_payload = {
             "asset": asset_id,
             "point": point,
-
-            # --- ACC ---
             "acceleration_rms_g": l1_features["acc_rms_g"],
             "acc_peak_g": l1_features["acc_peak_g"],
             "acc_hf_rms_g": l1_features["acc_hf_rms_g"],
             "crest_factor": l1_features["crest_factor"],
             "envelope_rms": l1_features["envelope_rms"],
-
-            # --- VELOCITY (ISO) ---
             "overall_vel_rms_mm_s": l1_features["overall_vel_rms_mm_s"],
-
-            # --- TEMP (EXT / OPTIONAL) ---
             "temperature_c": raw_payload.get("temperature"),
-
-            # --- FSM ---
-            "early_fault": early_fault.state.value in ("WARNING", "ALARM"),
             "state": early_fault.state.value,
             "confidence": early_fault.confidence,
-
+            "recommendation": recommendation,
+            "maintenance_action": maintenance_action,
             "timestamp": time.time(),
         }
 
-        # ---- PUBLISH SCADA ----   
+        # ---- PUBLISH ----
         publisher.publish_scada(asset_id, point, scada_payload)
-
-        # ---- PUBLISH EARLY FAULT ----
-        publisher.publish_early_fault(
-            asset_id,
-            point,
-            early_fault_event,
-        )
+        publisher.publish_early_fault(asset_id, point, early_fault_event)
 
         # ---- L2 TRIGGER ----
         if config["l2"]["enable"] and early_fault.state.value in ("WARNING", "ALARM"):
@@ -195,7 +196,6 @@ def main():
                     "early_fault_event": early_fault_event,
                     "publisher": publisher,
                 }
-
                 if l2_queue.enqueue(job):
                     heartbeat.mark_l2_exec()
                     l2_cooldown.mark_triggered(asset_id, point)
@@ -215,9 +215,3 @@ def main():
         port=config["mqtt"]["port"],
         topic=config["mqtt"]["raw_topic"],
     )
-
-
-if __name__ == "__main__":
-    main()
-
-
